@@ -17,4 +17,4 @@ sam deploy --template-file .aws-sam/build/template.yaml --stack-name $stackName 
   AppLoginCFName="$appLoginCFName" \
 --no-fail-on-empty-changeset \
 --tags Environment=$environment StackName=$stackName  \
---profile cirruscape
+--profile quizdash
