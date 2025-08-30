@@ -1,0 +1,1316 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >-
+  FizzBuzzTech FizzBuzzBoom api
+
+Transform:
+  - AWS::Serverless-2016-10-31
+
+Parameters:
+  Environment:
+    Type: String
+    Default: prod
+
+  InfraBaseCFName:
+    Type: String
+
+  AppLoginCFName:
+    Type: String
+
+  EnableProvisionedConcurrency:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+
+  LambdaProvisionedConcurrency:
+    Type: String
+    Default: 1
+
+  ToxicityThreshold:
+    Type: String
+    Default: 0.2
+
+  ApplicationLogLevel:
+    Type: String
+    AllowedValues:
+      - DEBUG
+      - INFO
+      - WARN
+      - ERROR
+    Default: DEBUG
+
+Conditions:
+  HasProvisionedConcurrency: !Equals [!Ref EnableProvisionedConcurrency, "true"]
+
+Resources:
+
+  GameSessionTable:
+    Type: AWS::DynamoDB::Table
+#    DeletionPolicy: Retain
+#    UpdateReplacePolicy: Retain
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: "sessionId"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "sessionId"
+          KeyType: "HASH"
+      BillingMode: PAY_PER_REQUEST
+#      ProvisionedThroughput:
+#        ReadCapacityUnits: 1
+#        WriteCapacityUnits: 1
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: false
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  GameSessionParticipantTable:
+    Type: AWS::DynamoDB::Table
+    #    DeletionPolicy: Retain
+    #    UpdateReplacePolicy: Retain
+    Properties:
+      AttributeDefinitions:
+        - AttributeName: "sessionId"
+          AttributeType: "S"
+        - AttributeName: "participantId"
+          AttributeType: "S"
+      KeySchema:
+        - AttributeName: "sessionId"
+          KeyType: "HASH"
+        - AttributeName: "participantId"
+          KeyType: "RANGE"
+      BillingMode: PAY_PER_REQUEST
+      #      ProvisionedThroughput:
+      #        ReadCapacityUnits: 1
+      #        WriteCapacityUnits: 1
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: false
+      TimeToLiveSpecification:
+        AttributeName: ttl
+        Enabled: true
+
+  LambdaExcecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+            Action:
+              - "sts:AssumeRole"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      Policies:
+        - PolicyName: lambdaPolicy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: DynamoDbPolicy
+                Effect: Allow
+                Action:
+                  - dynamodb:DescribeTable
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:Get*
+                Resource:
+                  - !GetAtt GameSessionTable.Arn
+                  - !GetAtt GameSessionParticipantTable.Arn
+              - Sid: EventBridgePolicy
+                Effect: Allow
+                Action:
+                  - events:PutEvents
+                Resource: "*"
+              - Sid: ApiGwPolicy
+                Effect: Allow
+                Action:
+                  - execute-api:*
+                Resource: "*"
+              - Sid: XRayPolicy
+                Effect: Allow
+                Action:
+                  - xray:Put*
+                Resource: "*"
+              - Sid: ComprehendPolicy
+                Effect: Allow
+                Action:
+                  - comprehend:DetectToxicContent
+                Resource: "*"
+
+  CreateSessionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Architectures:
+        - arm64
+      CodeUri: ./
+      Handler: index.handler
+      Runtime: nodejs22.x
+      MemorySize: 1024
+      Timeout: 100
+      AutoPublishAlias: prod
+      Description: Create FizzBuzzBoom game session
+      Tracing: Active
+      Role: !GetAtt LambdaExcecutionRole.Arn
+      ReservedConcurrentExecutions: 5
+
+      LoggingConfig:
+        LogGroup: !Ref CreateSessionFunctionLogs
+        LogFormat: JSON
+        ApplicationLogLevel: !Ref ApplicationLogLevel
+      Environment:
+        Variables:
+          SESSION_TABLE_NAME: !Ref GameSessionTable
+          SESSION_PARTICIPANT_TABLE_NAME: !Ref GameSessionParticipantTable
+          EVENT_BUS_ARN:
+            Fn::ImportValue: !Sub ${InfraBaseCFName}:QuizDashEventBusArn
+    Metadata: # Manage esbuild properties
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: "es2020"
+        Sourcemap: true
+        EntryPoints:
+          - src/application/lambdas/command-handlers/create-session/index.ts
+
+  CreateSessionFunctionLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-CreateSessionFunction"
+      RetentionInDays: 90
+
+  GetSessionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Architectures:
+        - arm64
+      CodeUri: ./
+      Handler: index.handler
+      Runtime: nodejs22.x
+      MemorySize: 1024
+      Timeout: 100
+      AutoPublishAlias: prod
+      Description: Retrieve FizzBuzzBoom game session
+      Tracing: Active
+      Role: !GetAtt LambdaExcecutionRole.Arn
+      ReservedConcurrentExecutions: 10
+
+      LoggingConfig:
+        LogGroup: !Ref GetSessionFunctionLogs
+        LogFormat: JSON
+        ApplicationLogLevel: !Ref ApplicationLogLevel
+      Environment:
+        Variables:
+          SESSION_TABLE_NAME: !Ref GameSessionTable
+          SESSION_PARTICIPANT_TABLE_NAME: !Ref GameSessionParticipantTable
+    Metadata: # Manage esbuild properties
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: "es2020"
+        Sourcemap: true
+        EntryPoints:
+          - src/application/lambdas/command-handlers/get-session/index.ts
+
+  GetSessionFunctionLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-GetSessionFunction"
+      RetentionInDays: 90
+
+  GetSessionParticipantsFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Architectures:
+        - arm64
+      CodeUri: ./
+      Handler: index.handler
+      Runtime: nodejs22.x
+      MemorySize: 1024
+      Timeout: 100
+      AutoPublishAlias: prod
+      Description: Retrieve FizzBuzzBoom game session participants
+      Tracing: Active
+      Role: !GetAtt LambdaExcecutionRole.Arn
+      ReservedConcurrentExecutions: 10
+
+      LoggingConfig:
+        LogGroup: !Ref GetSessionParticipantsFunctionLogs
+        LogFormat: JSON
+        ApplicationLogLevel: !Ref ApplicationLogLevel
+      Environment:
+        Variables:
+          SESSION_TABLE_NAME: !Ref GameSessionTable
+          SESSION_PARTICIPANT_TABLE_NAME: !Ref GameSessionParticipantTable
+    Metadata: # Manage esbuild properties
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: "es2020"
+        Sourcemap: true
+        EntryPoints:
+          - src/application/lambdas/command-handlers/get-session-participants/index.ts
+
+  GetSessionParticipantsFunctionLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-GetSessionParticipantsFunction"
+      RetentionInDays: 90
+
+  ReserveNicknameFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Architectures:
+        - arm64
+      CodeUri: ./
+      Handler: index.handler
+      Runtime: nodejs22.x
+      MemorySize: 512
+      Timeout: 100
+      AutoPublishAlias: prod
+      Description: Validate and reserve participant nickname for session
+      Tracing: Active
+      Role: !GetAtt LambdaExcecutionRole.Arn
+      ReservedConcurrentExecutions: 10
+      ProvisionedConcurrencyConfig: !If
+        - HasProvisionedConcurrency
+        - ProvisionedConcurrentExecutions: !Ref LambdaProvisionedConcurrency
+        - !Ref "AWS::NoValue"
+      LoggingConfig:
+        LogGroup: !Ref ReserveNicknameFunctionLogs
+        LogFormat: JSON
+        ApplicationLogLevel: !Ref ApplicationLogLevel
+      Environment:
+        Variables:
+          SESSION_TABLE_NAME: !Ref GameSessionTable
+          SESSION_PARTICIPANT_TABLE_NAME: !Ref GameSessionParticipantTable
+          TOXICITY_THRESHOLD: !Ref ToxicityThreshold
+    Metadata: # Manage esbuild properties
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: "es2020"
+        Sourcemap: true
+        EntryPoints:
+          - src/application/lambdas/command-handlers/reserve-nickname/index.ts
+
+  ReserveNicknameFunctionLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-ReserveNicknameFunction"
+      RetentionInDays: 90
+
+  PostQuestionFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Architectures:
+        - arm64
+      CodeUri: ./
+      Handler: index.handler
+      Runtime: nodejs22.x
+      MemorySize: 1024
+      Timeout: 100
+      AutoPublishAlias: prod
+      Description: Send quetion to game participants
+      Tracing: Active
+      Role: !GetAtt LambdaExcecutionRole.Arn
+      ReservedConcurrentExecutions: 5
+      ProvisionedConcurrencyConfig: !If
+        - HasProvisionedConcurrency
+        - ProvisionedConcurrentExecutions: !Ref LambdaProvisionedConcurrency
+        - !Ref "AWS::NoValue"
+      LoggingConfig:
+        LogGroup: !Ref PostQuestionFunctionLogs
+        LogFormat: JSON
+        ApplicationLogLevel: !Ref ApplicationLogLevel
+      Environment:
+        Variables:
+          SESSION_TABLE_NAME: !Ref GameSessionTable
+          SESSION_PARTICIPANT_TABLE_NAME: !Ref GameSessionParticipantTable
+          EVENT_BUS_ARN:
+            Fn::ImportValue: !Sub ${InfraBaseCFName}:QuizDashEventBusArn
+          WS_API_URL:
+            Fn::ImportValue: !Sub ${InfraBaseCFName}:WsGwCustomDomainName
+    Metadata: # Manage esbuild properties
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: "es2020"
+        Sourcemap: true
+        EntryPoints:
+          - src/application/lambdas/command-handlers/post-question/index.ts
+
+  PostQuestionFunctionLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-PostQuestionFunction"
+      RetentionInDays: 90
+
+  CheckAnswerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Architectures:
+        - arm64
+      CodeUri: ./
+      Handler: index.handler
+      Runtime: nodejs22.x
+      MemorySize: 1024
+      Timeout: 100
+      AutoPublishAlias: prod
+      Description: Check question submitted answer
+      Tracing: Active
+      Role: !GetAtt LambdaExcecutionRole.Arn
+      ReservedConcurrentExecutions: 10
+      ProvisionedConcurrencyConfig: !If
+        - HasProvisionedConcurrency
+        - ProvisionedConcurrentExecutions: !Ref LambdaProvisionedConcurrency
+        - !Ref "AWS::NoValue"
+      LoggingConfig:
+        LogGroup: !Ref CheckAnswerFunctionLogs
+        LogFormat: JSON
+        ApplicationLogLevel: !Ref ApplicationLogLevel
+      Environment:
+        Variables:
+          SESSION_TABLE_NAME: !Ref GameSessionTable
+          SESSION_PARTICIPANT_TABLE_NAME: !Ref GameSessionParticipantTable
+          EVENT_BUS_ARN:
+            Fn::ImportValue: !Sub ${InfraBaseCFName}:QuizDashEventBusArn
+          WS_API_URL:
+            Fn::ImportValue: !Sub ${InfraBaseCFName}:WsGwCustomDomainName
+    Metadata: # Manage esbuild properties
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: "es2020"
+        Sourcemap: true
+        EntryPoints:
+          - src/application/lambdas/command-handlers/check-answer/index.ts
+#
+  CheckAnswerFunctionLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-CheckAnswerFunction"
+      RetentionInDays: 90
+
+  QuestionAnsweredFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Architectures:
+        - arm64
+      CodeUri: ./
+      Handler: index.handler
+      Runtime: nodejs22.x
+      MemorySize: 1024
+      Timeout: 100
+      AutoPublishAlias: prod
+      Description: Check question submitted answer
+      Tracing: Active
+      Role: !GetAtt LambdaExcecutionRole.Arn
+      ReservedConcurrentExecutions: 10
+      ProvisionedConcurrencyConfig: !If
+        - HasProvisionedConcurrency
+        - ProvisionedConcurrentExecutions: !Ref LambdaProvisionedConcurrency
+        - !Ref "AWS::NoValue"
+      Environment:
+        Variables:
+          SESSION_TABLE_NAME: !Ref GameSessionTable
+          SESSION_PARTICIPANT_TABLE_NAME: !Ref GameSessionParticipantTable
+          EVENT_BUS_ARN:
+            Fn::ImportValue: !Sub ${InfraBaseCFName}:QuizDashEventBusArn
+          WS_API_URL:
+            Fn::ImportValue: !Sub ${InfraBaseCFName}:WsGwCustomDomainName
+      LoggingConfig:
+        LogGroup: !Ref QuestionAnsweredFunctionLogs
+        LogFormat: JSON
+        ApplicationLogLevel: !Ref ApplicationLogLevel
+    Metadata: # Manage esbuild properties
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: "es2020"
+        Sourcemap: true
+        EntryPoints:
+          - src/application/lambdas/event-handlers/question-answered/index.ts
+
+  QuestionAnsweredFunctionLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-QuestionAnsweredFunction"
+      RetentionInDays: 90
+
+  ApiGwExecutionLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Join ["", ["API-Gateway-Execution-Logs_", !Ref FbtBoomApi, '/Prod']]
+      RetentionInDays: 90
+
+  ApiGwAccessLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Join ["", ["API-Gateway-Access-Logs_", !Sub "${AWS::StackName}"]]
+      RetentionInDays: 90
+
+  WsApiGwAccessLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Join [ "", [ "WS-API-Gateway-Access-Logs_", !Sub "${AWS::StackName}" ] ]
+      RetentionInDays: 90
+
+  CreateSessionFunctionApiGatewayInvoke:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref "CreateSessionFunction.Alias"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${FbtBoomApi}/*"
+
+  GetSessionFunctionApiGatewayInvoke:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref "GetSessionFunction.Alias"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${FbtBoomApi}/*"
+
+  ReserveNicknameFunctionApiGatewayInvoke:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref "ReserveNicknameFunction.Alias"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${FbtBoomApi}/*"
+
+  GetSessionParticipantsFunctionApiGatewayInvoke:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref "GetSessionParticipantsFunction.Alias"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${FbtBoomApi}/*"
+
+  PostQuestionFunctionApiGatewayInvoke:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref "PostQuestionFunction.Alias"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${FbtBoomApi}/*"
+
+  CheckAnswerFunctionApiGatewayInvoke:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: "lambda:InvokeFunction"
+      FunctionName: !Ref "CheckAnswerFunction.Alias"
+      Principal: "apigateway.amazonaws.com"
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${FbtBoomApi}/*"
+
+  FbtBoomApi:
+    Type: AWS::Serverless::Api
+    DependsOn:
+      - CreateSessionFunction
+    Properties:
+      StageName: Prod
+      Name: !Sub "${AWS::StackName}-api"
+      EndpointConfiguration: REGIONAL
+      MinimumCompressionSize: 0
+      TracingEnabled: true
+      DisableExecuteApiEndpoint: true
+      OpenApiVersion: 3.0.1
+      AccessLogSetting:
+        DestinationArn: !GetAtt ApiGwAccessLogs.Arn
+        Format: >
+          {"requestTimeEpoch": $context.requestTimeEpoch, "requestId":"$context.requestId",
+          "httpMethod": "$context.httpMethod", "path":"$context.path", "resourcePath": "$context.resourcePath",
+          "status": "$context.status",
+          "lambdaRequestId": "$context.integration.requestId", "integrationStatus": "$context.integration.status",
+          "xrayTraceId": "$context.xrayTraceId", "responseLatency": $context.responseLatency,
+          "integrationLatency": "$context.integrationLatency", "error": "$context.error.message",
+          "userAgent": "$context.identity.userAgent", "sourceIp": "$context.identity.sourceIp"}
+      MethodSettings:
+        - HttpMethod: "*"
+          ResourcePath: "/*"
+          DataTraceEnabled: false
+          MetricsEnabled: true # Enable detailed metrics (error 404, latence, ...)
+          ThrottlingRateLimit: 10
+          ThrottlingBurstLimit: 10
+          LoggingLevel: ERROR
+      DefinitionBody:
+        openapi: "3.0.1"
+        info:
+          title: !Sub "${AWS::StackName}-api"
+          version: "2021-06-10T02:04:23Z"
+        paths:
+          /sessions:
+            post:
+              responses:
+                "201":
+                  description: "201 response"
+                  headers:
+                    Strict-Transport-Security:
+                      schema:
+                        type: "string"
+                    Access-Control-Allow-Origin:
+                      schema:
+                        type: "string"
+              security:
+                - FbtBoomiApiAuthorizer: [ ]
+                - ApiKeyAuth: []
+              x-amazon-apigateway-integration:
+                httpMethod: "POST"
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CreateSessionFunction.Arn}:prod/invocations"
+                responses:
+                  default:
+                    statusCode: "200"
+                    responseParameters:
+                      method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubdomains; preload'"
+                      method.response.header.Access-Control-Allow-Origin: "'*'"
+                passthroughBehavior: "when_no_match"
+                type: "aws_proxy"
+            options:
+              consumes:
+                - "application/json"
+              produces:
+                - "application/json"
+              responses:
+                "200":
+                  description: "200 response"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Headers:
+                      type: "string"
+                    Strict-Transport-Security:
+                      type: "string"
+                    X-Frame-Options:
+                      type: "string"
+                    Content-Security-Policy:
+                      type: "string"
+              x-amazon-apigateway-integration:
+                responses:
+                  default:
+                    statusCode: "200"
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Methods: "'GET,POST,PATCH,PUT,DELETE,OPTIONS'"
+                      method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                      method.response.header.Access-Control-Allow-Origin: "'*'"
+                      method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubdomains; preload'"
+                      method.response.header.X-Frame-Options: "'DENY'"
+                      method.response.header.Content-Security-Policy: "'default-src \"none\"; frame-ancestors \"none\"'"
+                requestTemplates:
+                  application/json: "{\"statusCode\": 200}"
+                passthroughBehavior: "when_no_match"
+                type: "mock"
+
+          /sessions/{id}:
+            get:
+              responses:
+                "201":
+                  description: "201 response"
+                  headers:
+                    Strict-Transport-Security:
+                      schema:
+                        type: "string"
+                    Access-Control-Allow-Origin:
+                      schema:
+                        type: "string"
+              security:
+                - ApiKeyAuth: []
+              x-amazon-apigateway-integration:
+                httpMethod: "POST"
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetSessionFunction.Arn}:prod/invocations"
+                responses:
+                  default:
+                    statusCode: "200"
+                    responseParameters:
+                      method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubdomains; preload'"
+                      method.response.header.Access-Control-Allow-Origin: "'*'"
+                passthroughBehavior: "when_no_match"
+                type: "aws_proxy"
+            options:
+              consumes:
+                - "application/json"
+              produces:
+                - "application/json"
+              responses:
+                "200":
+                  description: "200 response"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Headers:
+                      type: "string"
+                    Strict-Transport-Security:
+                      type: "string"
+                    X-Frame-Options:
+                      type: "string"
+                    Content-Security-Policy:
+                      type: "string"
+              x-amazon-apigateway-integration:
+                responses:
+                  default:
+                    statusCode: "200"
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Methods: "'GET,POST,PATCH,PUT,DELETE,OPTIONS'"
+                      method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                      method.response.header.Access-Control-Allow-Origin: "'*'"
+                      method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubdomains; preload'"
+                      method.response.header.X-Frame-Options: "'DENY'"
+                      method.response.header.Content-Security-Policy: "'default-src \"none\"; frame-ancestors \"none\"'"
+                requestTemplates:
+                  application/json: "{\"statusCode\": 200}"
+                passthroughBehavior: "when_no_match"
+                type: "mock"
+
+          /sessions/{id}/participants:
+            post:
+              responses:
+                "201":
+                  description: "201 response"
+                  headers:
+                    Strict-Transport-Security:
+                      schema:
+                        type: "string"
+                    Access-Control-Allow-Origin:
+                      schema:
+                        type: "string"
+              security:
+                - ApiKeyAuth: []
+              x-amazon-apigateway-integration:
+                httpMethod: "POST"
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${ReserveNicknameFunction.Arn}:prod/invocations"
+                responses:
+                  default:
+                    statusCode: "200"
+                    responseParameters:
+                      method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubdomains; preload'"
+                      method.response.header.Access-Control-Allow-Origin: "'*'"
+                passthroughBehavior: "when_no_match"
+                type: "aws_proxy"
+
+            get:
+              responses:
+                "201":
+                  description: "201 response"
+                  headers:
+                    Strict-Transport-Security:
+                      schema:
+                        type: "string"
+                    Access-Control-Allow-Origin:
+                      schema:
+                        type: "string"
+              security:
+                - ApiKeyAuth: []
+              x-amazon-apigateway-integration:
+                httpMethod: "POST"
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetSessionParticipantsFunction.Arn}:prod/invocations"
+                responses:
+                  default:
+                    statusCode: "200"
+                    responseParameters:
+                      method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubdomains; preload'"
+                      method.response.header.Access-Control-Allow-Origin: "'*'"
+                passthroughBehavior: "when_no_match"
+                type: "aws_proxy"
+            options:
+              consumes:
+                - "application/json"
+              produces:
+                - "application/json"
+              responses:
+                "200":
+                  description: "200 response"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Headers:
+                      type: "string"
+                    Strict-Transport-Security:
+                      type: "string"
+                    X-Frame-Options:
+                      type: "string"
+                    Content-Security-Policy:
+                      type: "string"
+              x-amazon-apigateway-integration:
+                responses:
+                  default:
+                    statusCode: "200"
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Methods: "'GET,POST,PATCH,PUT,DELETE,OPTIONS'"
+                      method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                      method.response.header.Access-Control-Allow-Origin: "'*'"
+                      method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubdomains; preload'"
+                      method.response.header.X-Frame-Options: "'DENY'"
+                      method.response.header.Content-Security-Policy: "'default-src \"none\"; frame-ancestors \"none\"'"
+                requestTemplates:
+                  application/json: "{\"statusCode\": 200}"
+                passthroughBehavior: "when_no_match"
+                type: "mock"
+
+          /sessions/{id}/questions:
+            post:
+              responses:
+                "201":
+                  description: "201 response"
+                  headers:
+                    Strict-Transport-Security:
+                      schema:
+                        type: "string"
+                    Access-Control-Allow-Origin:
+                      schema:
+                        type: "string"
+              security:
+                - FbtBoomiApiAuthorizer: [ ]
+                - ApiKeyAuth: []
+              x-amazon-apigateway-integration:
+                httpMethod: "POST"
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${PostQuestionFunction.Arn}:prod/invocations"
+                responses:
+                  default:
+                    statusCode: "200"
+                    responseParameters:
+                      method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubdomains; preload'"
+                      method.response.header.Access-Control-Allow-Origin: "'*'"
+                passthroughBehavior: "when_no_match"
+                type: "aws_proxy"
+            options:
+              consumes:
+                - "application/json"
+              produces:
+                - "application/json"
+              responses:
+                "200":
+                  description: "200 response"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Headers:
+                      type: "string"
+                    Strict-Transport-Security:
+                      type: "string"
+                    X-Frame-Options:
+                      type: "string"
+                    Content-Security-Policy:
+                      type: "string"
+              x-amazon-apigateway-integration:
+                responses:
+                  default:
+                    statusCode: "200"
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Methods: "'GET,POST,PATCH,PUT,DELETE,OPTIONS'"
+                      method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                      method.response.header.Access-Control-Allow-Origin: "'*'"
+                      method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubdomains; preload'"
+                      method.response.header.X-Frame-Options: "'DENY'"
+                      method.response.header.Content-Security-Policy: "'default-src \"none\"; frame-ancestors \"none\"'"
+                requestTemplates:
+                  application/json: "{\"statusCode\": 200}"
+                passthroughBehavior: "when_no_match"
+                type: "mock"
+          /answers:
+            post:
+              responses:
+                "201":
+                  description: "201 response"
+                  headers:
+                    Strict-Transport-Security:
+                      schema:
+                        type: "string"
+                    Access-Control-Allow-Origin:
+                      schema:
+                        type: "string"
+              security:
+                - ApiKeyAuth: []
+              x-amazon-apigateway-integration:
+                httpMethod: "POST"
+                uri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${CheckAnswerFunction.Arn}:prod/invocations"
+                responses:
+                  default:
+                    statusCode: "200"
+                    responseParameters:
+                      method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubdomains; preload'"
+                      method.response.header.Access-Control-Allow-Origin: "'*'"
+                passthroughBehavior: "when_no_match"
+                type: "aws_proxy"
+            options:
+              consumes:
+                - "application/json"
+              produces:
+                - "application/json"
+              responses:
+                "200":
+                  description: "200 response"
+                  headers:
+                    Access-Control-Allow-Origin:
+                      type: "string"
+                    Access-Control-Allow-Methods:
+                      type: "string"
+                    Access-Control-Allow-Headers:
+                      type: "string"
+                    Strict-Transport-Security:
+                      type: "string"
+                    X-Frame-Options:
+                      type: "string"
+                    Content-Security-Policy:
+                      type: "string"
+              x-amazon-apigateway-integration:
+                responses:
+                  default:
+                    statusCode: "200"
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Methods: "'GET,POST,PATCH,PUT,DELETE,OPTIONS'"
+                      method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                      method.response.header.Access-Control-Allow-Origin: "'*'"
+                      method.response.header.Strict-Transport-Security: "'max-age=31536000; includeSubdomains; preload'"
+                      method.response.header.X-Frame-Options: "'DENY'"
+                      method.response.header.Content-Security-Policy: "'default-src \"none\"; frame-ancestors \"none\"'"
+                requestTemplates:
+                  application/json: "{\"statusCode\": 200}"
+                passthroughBehavior: "when_no_match"
+                type: "mock"
+        components:
+          securitySchemes:
+            FbtBoomiApiAuthorizer:
+              type: "apiKey"
+              name: "Authorization"
+              in: "header"
+              x-amazon-apigateway-authtype: "cognito_user_pools"
+              x-amazon-apigateway-authorizer:
+                providerARNs:
+                  - Fn::ImportValue: !Sub ${AppLoginCFName}:UserPoolArn
+                type: "cognito_user_pools"
+            ApiKeyAuth:
+              type: apiKey
+              name: x-api-key
+              in: header
+              x-amazon-apigateway-api-key-source: "HEADER"
+        x-amazon-apigateway-gateway-responses:
+          DEFAULT_5XX:
+            responseParameters:
+              gatewayresponse.header.Access-Control-Allow-Methods: "'GET,OPTIONS,POST'"
+              gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+              gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+          DEFAULT_4XX:
+            responseParameters:
+              gatewayresponse.header.Access-Control-Allow-Methods: "'GET,OPTIONS,POST'"
+              gatewayresponse.header.Access-Control-Allow-Origin: "'*'"
+              gatewayresponse.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+        x-amazon-apigateway-minimum-compression-size: 0
+
+
+  ApiBasePathMapping:
+    Type: AWS::ApiGatewayV2::ApiMapping
+    Properties:
+      DomainName:
+        Fn::ImportValue: !Sub ${InfraBaseCFName}:ApiGwCustomDomainName
+      ApiId: !Ref FbtBoomApi
+      Stage: !Ref FbtBoomApi.Stage
+      ApiMappingKey: "fizzbuzzboom/v1"
+
+  # WEB SOCKET
+  SocketConnectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Architectures:
+        - arm64
+      CodeUri: ./
+      Handler: index.handler
+      Runtime: nodejs22.x
+      MemorySize: 1024
+      Timeout: 100
+      AutoPublishAlias: prod
+      Description: Websocket connect
+      Tracing: Active
+      Role: !GetAtt LambdaExcecutionRole.Arn
+      ReservedConcurrentExecutions: 10
+      ProvisionedConcurrencyConfig: !If
+        - HasProvisionedConcurrency
+        - ProvisionedConcurrentExecutions: !Ref LambdaProvisionedConcurrency
+        - !Ref "AWS::NoValue"
+      LoggingConfig:
+        LogGroup: !Ref SocketConnectFunctionLogs
+        LogFormat: JSON
+        ApplicationLogLevel: DEBUG
+      Environment:
+        Variables:
+          SESSION_TABLE_NAME: !Ref GameSessionTable
+          SESSION_PARTICIPANT_TABLE_NAME: !Ref GameSessionParticipantTable
+          USERPOOL_ID:
+            Fn::ImportValue: !Sub ${AppLoginCFName}:UserPoolId
+          CLIENT_ID:
+            Fn::ImportValue: !Sub ${AppLoginCFName}:UserPoolClientWebPortalClientId
+          EVENT_BUS_ARN:
+            Fn::ImportValue: !Sub ${InfraBaseCFName}:QuizDashEventBusArn
+    Metadata: # Manage esbuild properties
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: "es2020"
+        Sourcemap: true
+        EntryPoints:
+          - src/application/lambdas/websockets/connect/index.ts
+
+  SocketConnectFunctionLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}--SocketConnectFunction"
+      RetentionInDays: 7
+
+  SocketDisconnectFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Architectures:
+        - arm64
+      CodeUri: ./
+      Handler: index.handler
+      Runtime: nodejs22.x
+      MemorySize: 1024
+      Timeout: 100
+      AutoPublishAlias: prod
+      Description: Websocket disconnect
+      Tracing: Active
+      Role: !GetAtt LambdaExcecutionRole.Arn
+      ReservedConcurrentExecutions: 10
+      ProvisionedConcurrencyConfig: !If
+        - HasProvisionedConcurrency
+        - ProvisionedConcurrentExecutions: !Ref LambdaProvisionedConcurrency
+        - !Ref "AWS::NoValue"
+      LoggingConfig:
+        LogGroup: !Ref SocketDisconnectFunctionLogs
+        LogFormat: JSON
+        ApplicationLogLevel: DEBUG
+      Environment:
+        Variables:
+          SESSION_TABLE_NAME: !Ref GameSessionTable
+          SESSION_PARTICIPANT_TABLE_NAME: !Ref GameSessionParticipantTable
+          EVENT_BUS_ARN:
+            Fn::ImportValue: !Sub ${InfraBaseCFName}:QuizDashEventBusArn
+    Metadata: # Manage esbuild properties
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: "es2020"
+        Sourcemap: true
+        EntryPoints:
+          - src/application/lambdas/websockets/disconnect/index.ts
+
+  SocketDisconnectFunctionLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-SocketDisconnectFunction"
+      RetentionInDays: 7
+
+#  SocketAuthoriseFunction:
+#    Type: AWS::Serverless::Function
+#    Properties:
+#      CodeUri: ./
+#      Handler: index.handler
+#      Runtime: nodejs22.x
+#      MemorySize: 512
+#      Timeout: 100
+#      Description: Websocket authorise
+#      Tracing: Active
+#      Role: !GetAtt LambdaExcecutionRole.Arn
+#      ReservedConcurrentExecutions: 1
+#      Environment:
+#        Variables:
+#          IS_DEBUG_ENABLED: false
+#          USERPOOL_ID:
+#            Fn::ImportValue: !Sub ${AppLoginCFName}:UserPoolId
+#          CLIENT_ID:
+#            Fn::ImportValue: !Sub ${AppLoginCFName}:UserPoolClientWebPortalClientId
+#          EVENT_BUS_ARN:
+#            Fn::ImportValue: !Sub ${InfraBaseCFName}:QuizDashEventBusArn
+#    Metadata: # Manage esbuild properties
+#      BuildMethod: esbuild
+#      BuildProperties:
+#        Minify: false
+#        Target: "es2020"
+#        Sourcemap: true
+#        EntryPoints:
+#          - src/application/lambdas/websockets/authorise/index.ts
+
+#  SocketAuthoriseFunctionLogs:
+#    Type: AWS::Logs::LogGroup
+#    Properties:
+#      LogGroupName: !Join [ "", [ "/aws/lambda/", !Ref SocketAuthoriseFunction ] ]
+#      RetentionInDays: 7
+
+  ParticipantConnectedFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Architectures:
+        - arm64
+      CodeUri: ./
+      Handler: index.handler
+      Runtime: nodejs22.x
+      MemorySize: 1024
+      Timeout: 100
+      AutoPublishAlias: prod
+      Description: Websocket authorise
+      Tracing: Active
+      Role: !GetAtt LambdaExcecutionRole.Arn
+      ReservedConcurrentExecutions: 10
+      ProvisionedConcurrencyConfig: !If
+        - HasProvisionedConcurrency
+        - ProvisionedConcurrentExecutions: !Ref LambdaProvisionedConcurrency
+        - !Ref "AWS::NoValue"
+      LoggingConfig:
+        LogGroup: !Ref ParticipantConnectedFunctionLogs
+        LogFormat: JSON
+        ApplicationLogLevel: DEBUG
+      Environment:
+        Variables:
+          IS_DEBUG_ENABLED: false
+          SESSION_TABLE_NAME: !Ref GameSessionTable
+          SESSION_PARTICIPANT_TABLE_NAME: !Ref GameSessionParticipantTable
+          USERPOOL_ID:
+            Fn::ImportValue: !Sub ${AppLoginCFName}:UserPoolId
+          CLIENT_ID:
+            Fn::ImportValue: !Sub ${AppLoginCFName}:UserPoolClientWebPortalClientId
+          EVENT_BUS_ARN:
+            Fn::ImportValue: !Sub ${InfraBaseCFName}:QuizDashEventBusArn
+          WS_API_URL:
+            Fn::ImportValue: !Sub ${InfraBaseCFName}:WsGwCustomDomainName
+    Metadata: # Manage esbuild properties
+      BuildMethod: esbuild
+      BuildProperties:
+        Minify: false
+        Target: "es2020"
+        Sourcemap: true
+        EntryPoints:
+          - src/application/lambdas/event-handlers/participant-connected/index.ts
+
+  ParticipantConnectedFunctionLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-ParticipantConnectedFunction"
+      RetentionInDays: 7
+
+  ParticipantConnectedRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Subscribe to participant connected events
+      EventBusName:
+        Fn::ImportValue: !Sub ${InfraBaseCFName}:QuizDashEventBusArn
+      EventPattern:
+        source:
+          - "qd-app-fizzbuzzboom.WsConnectHandler"
+        detail-type:
+          - "ParticipantConnected"
+        detail:
+          sessionId:
+            -  exists: true
+      State: ENABLED
+      Targets:
+        - Arn: !Sub ${ParticipantConnectedFunction.Arn}:prod
+          Id: ParticipantConnectedFunction
+
+  ParticipantConnectedRulePermissions:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Sub ${ParticipantConnectedFunction.Arn}:prod
+      Action: lambda:InvokeFunction
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt ParticipantConnectedRule.Arn
+
+  QuestionAnsweredRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Description: Subscribe to participant connected events
+      EventBusName:
+        Fn::ImportValue: !Sub ${InfraBaseCFName}:QuizDashEventBusArn
+      EventPattern:
+        source:
+          - "qd-app-fizzbuzzboom.GameSessionService"
+        detail-type:
+          - "QuestionAnswered"
+      State: ENABLED
+      Targets:
+        - Arn: !Sub ${QuestionAnsweredFunction.Arn}:prod
+          Id: QuestionAnsweredFunction
+
+  QuestionAnsweredRulePermissions:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref QuestionAnsweredFunction.Alias
+      Action: lambda:InvokeFunction
+      Principal: "events.amazonaws.com"
+      SourceArn: !GetAtt QuestionAnsweredRule.Arn
+
+  FbbWebSocketsApiGwExecutionLogs:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Join [ "", [ "API-Gateway-Execution-Logs_", !Ref FbtWebSocketsApi, '/Prod' ] ]
+      RetentionInDays: 90
+
+
+  SocketConnectFunctionApiGatewayInvoke:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref SocketConnectFunction.Alias
+      Principal: apigateway.amazonaws.com
+
+  SocketDisconnectFunctionApiGatewayInvoke:
+    Type: "AWS::Lambda::Permission"
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref SocketDisconnectFunction.Alias
+      Principal: apigateway.amazonaws.com
+
+  FbtWebSocketsApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub ${AWS::StackName}-FbtWebSocketsApi
+      ProtocolType: WEBSOCKET
+      DisableSchemaValidation: true
+      DisableExecuteApiEndpoint: false
+      RouteSelectionExpression: "$request.body.action"
+
+  ConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref FbtWebSocketsApi
+      ApiKeyRequired: false
+      RouteKey: "$connect"
+      AuthorizationType: NONE
+      OperationName: ConnectRoute
+      # AuthorizerId: !Ref FbtWebSocketsAuthorizer
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref ConnectRouteIntegration
+
+  ConnectRouteIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref FbtWebSocketsApi
+      Description: Connect Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SocketConnectFunction.Arn}:prod/invocations"
+
+  DisconnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref FbtWebSocketsApi
+      RouteKey: "$disconnect"
+      AuthorizationType: NONE
+      OperationName: DisconnectRoute
+      # AuthorizerId: !Ref Auth
+      Target: !Join
+        - '/'
+        - - 'integrations'
+          - !Ref DisconnectRouteIntegration
+
+  DisconnectRouteIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref FbtWebSocketsApi
+      Description: Disconnect Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${SocketDisconnectFunction.Arn}:prod/invocations"
+
+#  Deployment:
+#    Type: AWS::ApiGatewayV2::Deployment
+#    DependsOn:
+#      - ConnectRoute
+#      - DisconnectRoute
+#    Properties:
+#      ApiId: !Ref FbtWebSocketsApi
+
+  Stage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      StageName: Prod
+      Description: Prod
+      # DeploymentId: !Ref Deployment
+      AutoDeploy: true
+      ApiId: !Ref FbtWebSocketsApi
+      AccessLogSettings:
+        DestinationArn: !GetAtt WsApiGwAccessLogs.Arn
+        Format: >
+          {"requestTimeEpoch": "$context.requestTimeEpoch", "requestId": "$context.requestId",
+          "routeKey": "$context.routeKey", "connectionId": "$context.connectionId", "status": "$context.status",
+          "lambdaRequestId": "$context.integration.requestId", "integrationStatus": "$context.integration.status",
+          "integrationLatency": "$context.integrationLatency", "error": "$context.error.message",
+          "integrationError": "$context.integration.error",
+          "errorResponseType": "$context.error.responseType", "eventType": "$context.eventType",
+          "userAgent": "$context.identity.userAgent", "sourceIp": "$context.identity.sourceIp"}
+      DefaultRouteSettings:
+        DataTraceEnabled: true
+        LoggingLevel: INFO
+        ThrottlingBurstLimit: 20
+        ThrottlingRateLimit: 20
+
+#  AuthorizerExecutionRole:
+#    Type: AWS::IAM::Role
+#    Properties:
+#      AssumeRolePolicyDocument:
+#        Version: 2012-10-17
+#        Statement:
+#          - Effect: Allow
+#            Principal:
+#              Service:
+#                - apigateway.amazonaws.com
+#            Action:
+#              - sts:AssumeRole
+#      ManagedPolicyArns:
+#        - !Sub arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+#      Policies:
+#        - PolicyName: InvokeAuthorizer
+#          PolicyDocument:
+#            Version: 2012-10-17
+#            Statement:
+#              - Effect: Allow
+#                Action:
+#                  - lambda:InvokeFunction
+#                Resource: !GetAtt SocketAuthoriseFunction.Arn
+#              - Effect: Allow
+#                Action:
+#                  - logs:*
+#                Resource: "*"
+
+  FbbWebSocketsApiBasePathMapping:
+    Type: AWS::ApiGatewayV2::ApiMapping
+    DependsOn:
+      - FbtWebSocketsApi
+    Properties:
+      DomainName:
+        Fn::ImportValue: !Sub ${InfraBaseCFName}:WsGwCustomDomainName
+      ApiId: !Ref FbtWebSocketsApi
+      Stage: !Ref Stage
+      ApiMappingKey: "fbb"
+
+  WsUsagePlan:
+    Type: AWS::ApiGateway::UsagePlan
+    Properties:
+      ApiStages:
+        - ApiId: !Ref FbtWebSocketsApi
+          Stage: !Ref Stage
+        - ApiId: !Ref FbtBoomApi
+          Stage: !Ref FbtBoomApi.Stage
+      Description: !Sub ${AWS::StackName}-WsUsagePlan
+      Quota:
+        Limit: 1000
+        Period: WEEK
+      UsagePlanName: !Sub ${AWS::StackName}-WsUsagePlan
+
+
+#Outputs:
+#  FbtBoomApi:
+#    Description: Id of FizzBuzzBoom api
+#    Value: !Ref FbtBoomApi
+#    Export:
+#      Name: !Sub '${AWS::StackName}:FbtBoomApi'
