@@ -27,9 +27,12 @@ exports.handler = async (event, context) => {
     return HttpUtils.buildJsonResponse(400, {message: "Nickname already exists"});
   }
 
+  const startTime = Date.now();
   const toxicityCheckResult = await toxicityCheckSvc.detectToxicity(nickname);
+  const endTime = Date.now();
   const resultList = toxicityCheckResult.ResultList;
   console.debug(`CheckName: ${nickname} result:`, JSON.stringify(resultList));
+  console.debug(`ToxicityCheck execution time: ${endTime - startTime} ms`)
 
   const toxicLabel = resultList
     .flatMap(r => r.Labels)

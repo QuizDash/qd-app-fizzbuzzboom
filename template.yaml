@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: 2010-09-09
 Description: >-
-  FizzBuzzTech FizzBuzzBoom api
+  Cirruscape FizzBuzzBoom api (Bryce Cummock, 2025)
 
 Transform:
   - AWS::Serverless-2016-10-31
@@ -37,6 +37,36 @@ Parameters:
       - WARN
       - ERROR
     Default: DEBUG
+
+  GameMaxLambdaConcurrentExecutions:
+    Type: String
+    Default: 10
+
+  SocketDisconnectMaxLambdaConcurrentExecutions:
+    Type: String
+    Description: Typically higher
+    Default: 10
+
+  ReserveNicknameMaxLambdaConcurrentExecutions:
+    Type: String
+    Description: Typically higher - Comprehend calls may take longer?
+    Default: 20
+
+  RestApiThrottleRateLimit:
+    Type: String
+    Default: 10
+
+  RestApiThrottleBurstLimit:
+    Type: String
+    Default: 10
+
+  WssApiThrottleRateLimit:
+    Type: String
+    Default: 20
+
+  WssApiThrottleBurstLimit:
+    Type: String
+    Default: 20
 
 Conditions:
   HasProvisionedConcurrency: !Equals [!Ref EnableProvisionedConcurrency, "true"]
@@ -151,7 +181,7 @@ Resources:
       Handler: index.handler
       Runtime: nodejs22.x
       MemorySize: 1024
-      Timeout: 100
+      Timeout: 10
       AutoPublishAlias: prod
       Description: Create FizzBuzzBoom game session
       Tracing: Active
@@ -192,12 +222,12 @@ Resources:
       Handler: index.handler
       Runtime: nodejs22.x
       MemorySize: 1024
-      Timeout: 100
+      Timeout: 10
       AutoPublishAlias: prod
       Description: Retrieve FizzBuzzBoom game session
       Tracing: Active
       Role: !GetAtt LambdaExcecutionRole.Arn
-      ReservedConcurrentExecutions: 10
+      ReservedConcurrentExecutions: !Ref GameMaxLambdaConcurrentExecutions
 
       LoggingConfig:
         LogGroup: !Ref GetSessionFunctionLogs
@@ -231,12 +261,12 @@ Resources:
       Handler: index.handler
       Runtime: nodejs22.x
       MemorySize: 1024
-      Timeout: 100
+      Timeout: 10
       AutoPublishAlias: prod
       Description: Retrieve FizzBuzzBoom game session participants
       Tracing: Active
       Role: !GetAtt LambdaExcecutionRole.Arn
-      ReservedConcurrentExecutions: 10
+      ReservedConcurrentExecutions: !Ref GameMaxLambdaConcurrentExecutions
 
       LoggingConfig:
         LogGroup: !Ref GetSessionParticipantsFunctionLogs
@@ -270,12 +300,12 @@ Resources:
       Handler: index.handler
       Runtime: nodejs22.x
       MemorySize: 512
-      Timeout: 100
+      Timeout: 10
       AutoPublishAlias: prod
       Description: Validate and reserve participant nickname for session
       Tracing: Active
       Role: !GetAtt LambdaExcecutionRole.Arn
-      ReservedConcurrentExecutions: 10
+      ReservedConcurrentExecutions:  !Ref ReserveNicknameMaxLambdaConcurrentExecutions
       ProvisionedConcurrencyConfig: !If
         - HasProvisionedConcurrency
         - ProvisionedConcurrentExecutions: !Ref LambdaProvisionedConcurrency
@@ -313,7 +343,7 @@ Resources:
       Handler: index.handler
       Runtime: nodejs22.x
       MemorySize: 1024
-      Timeout: 100
+      Timeout: 10
       AutoPublishAlias: prod
       Description: Send quetion to game participants
       Tracing: Active
@@ -359,7 +389,7 @@ Resources:
       Handler: index.handler
       Runtime: nodejs22.x
       MemorySize: 1024
-      Timeout: 100
+      Timeout: 10
       AutoPublishAlias: prod
       Description: Check question submitted answer
       Tracing: Active
@@ -405,7 +435,7 @@ Resources:
       Handler: index.handler
       Runtime: nodejs22.x
       MemorySize: 1024
-      Timeout: 100
+      Timeout: 10
       AutoPublishAlias: prod
       Description: Check question submitted answer
       Tracing: Active
@@ -535,8 +565,8 @@ Resources:
           ResourcePath: "/*"
           DataTraceEnabled: false
           MetricsEnabled: true # Enable detailed metrics (error 404, latence, ...)
-          ThrottlingRateLimit: 10
-          ThrottlingBurstLimit: 10
+          ThrottlingRateLimit: !Ref RestApiThrottleRateLimit
+          ThrottlingBurstLimit: !Ref RestApiThrottleBurstLimit
           LoggingLevel: ERROR
       DefinitionBody:
         openapi: "3.0.1"
@@ -928,12 +958,12 @@ Resources:
       Handler: index.handler
       Runtime: nodejs22.x
       MemorySize: 1024
-      Timeout: 100
+      Timeout: 10
       AutoPublishAlias: prod
       Description: Websocket connect
       Tracing: Active
       Role: !GetAtt LambdaExcecutionRole.Arn
-      ReservedConcurrentExecutions: 10
+      ReservedConcurrentExecutions: !Ref GameMaxLambdaConcurrentExecutions
       ProvisionedConcurrencyConfig: !If
         - HasProvisionedConcurrency
         - ProvisionedConcurrentExecutions: !Ref LambdaProvisionedConcurrency
@@ -941,7 +971,7 @@ Resources:
       LoggingConfig:
         LogGroup: !Ref SocketConnectFunctionLogs
         LogFormat: JSON
-        ApplicationLogLevel: DEBUG
+        ApplicationLogLevel: !Ref ApplicationLogLevel
       Environment:
         Variables:
           SESSION_TABLE_NAME: !Ref GameSessionTable
@@ -976,12 +1006,12 @@ Resources:
       Handler: index.handler
       Runtime: nodejs22.x
       MemorySize: 1024
-      Timeout: 100
+      Timeout: 10
       AutoPublishAlias: prod
       Description: Websocket disconnect
       Tracing: Active
       Role: !GetAtt LambdaExcecutionRole.Arn
-      ReservedConcurrentExecutions: 10
+      ReservedConcurrentExecutions: !Ref SocketDisconnectMaxLambdaConcurrentExecutions
       ProvisionedConcurrencyConfig: !If
         - HasProvisionedConcurrency
         - ProvisionedConcurrentExecutions: !Ref LambdaProvisionedConcurrency
@@ -989,7 +1019,7 @@ Resources:
       LoggingConfig:
         LogGroup: !Ref SocketDisconnectFunctionLogs
         LogFormat: JSON
-        ApplicationLogLevel: DEBUG
+        ApplicationLogLevel: !Ref ApplicationLogLevel
       Environment:
         Variables:
           SESSION_TABLE_NAME: !Ref GameSessionTable
@@ -1056,12 +1086,12 @@ Resources:
       Handler: index.handler
       Runtime: nodejs22.x
       MemorySize: 1024
-      Timeout: 100
+      Timeout: 10
       AutoPublishAlias: prod
       Description: Websocket authorise
       Tracing: Active
       Role: !GetAtt LambdaExcecutionRole.Arn
-      ReservedConcurrentExecutions: 10
+      ReservedConcurrentExecutions: !Ref GameMaxLambdaConcurrentExecutions
       ProvisionedConcurrencyConfig: !If
         - HasProvisionedConcurrency
         - ProvisionedConcurrentExecutions: !Ref LambdaProvisionedConcurrency
@@ -1069,7 +1099,7 @@ Resources:
       LoggingConfig:
         LogGroup: !Ref ParticipantConnectedFunctionLogs
         LogFormat: JSON
-        ApplicationLogLevel: DEBUG
+        ApplicationLogLevel: !Ref ApplicationLogLevel
       Environment:
         Variables:
           IS_DEBUG_ENABLED: false
@@ -1251,8 +1281,8 @@ Resources:
       DefaultRouteSettings:
         DataTraceEnabled: true
         LoggingLevel: INFO
-        ThrottlingBurstLimit: 20
-        ThrottlingRateLimit: 20
+        ThrottlingBurstLimit: !Ref WssApiThrottleBurstLimit
+        ThrottlingRateLimit: !Ref WssApiThrottleRateLimit
 
 #  AuthorizerExecutionRole:
 #    Type: AWS::IAM::Role
@@ -1308,9 +1338,9 @@ Resources:
       UsagePlanName: !Sub ${AWS::StackName}-WsUsagePlan
 
 
-#Outputs:
-#  FbtBoomApi:
-#    Description: Id of FizzBuzzBoom api
-#    Value: !Ref FbtBoomApi
-#    Export:
-#      Name: !Sub '${AWS::StackName}:FbtBoomApi'
+Outputs:
+  FbtBoomApi:
+    Description: Id of FizzBuzzBoom api
+    Value: !Ref FbtBoomApi
+    Export:
+      Name: !Sub '${AWS::StackName}:FbtBoomApi'
