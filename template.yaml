@@ -38,6 +38,15 @@ Parameters:
       - ERROR
     Default: DEBUG
 
+  ReserveNicknameAppLogLevel:
+    Type: String
+    AllowedValues:
+      - DEBUG
+      - INFO
+      - WARN
+      - ERROR
+    Default: WARN
+
   GameMaxLambdaConcurrentExecutions:
     Type: String
     Default: 10
@@ -300,7 +309,7 @@ Resources:
       Handler: index.handler
       Runtime: nodejs22.x
       MemorySize: 512
-      Timeout: 10
+      Timeout: 20
       AutoPublishAlias: prod
       Description: Validate and reserve participant nickname for session
       Tracing: Active
@@ -313,7 +322,7 @@ Resources:
       LoggingConfig:
         LogGroup: !Ref ReserveNicknameFunctionLogs
         LogFormat: JSON
-        ApplicationLogLevel: !Ref ApplicationLogLevel
+        ApplicationLogLevel: !Ref ReserveNicknameAppLogLevel
       Environment:
         Variables:
           SESSION_TABLE_NAME: !Ref GameSessionTable
@@ -1279,8 +1288,8 @@ Resources:
           "errorResponseType": "$context.error.responseType", "eventType": "$context.eventType",
           "userAgent": "$context.identity.userAgent", "sourceIp": "$context.identity.sourceIp"}
       DefaultRouteSettings:
-        DataTraceEnabled: true
-        LoggingLevel: INFO
+        DataTraceEnabled: false
+        LoggingLevel: ERROR
         ThrottlingBurstLimit: !Ref WssApiThrottleBurstLimit
         ThrottlingRateLimit: !Ref WssApiThrottleRateLimit
 
@@ -1332,9 +1341,9 @@ Resources:
         - ApiId: !Ref FbtBoomApi
           Stage: !Ref FbtBoomApi.Stage
       Description: !Sub ${AWS::StackName}-WsUsagePlan
-      Quota:
-        Limit: 1000
-        Period: WEEK
+#      Quota:
+#        Limit: 1000
+#        Period: WEEK
       UsagePlanName: !Sub ${AWS::StackName}-WsUsagePlan
 
 
