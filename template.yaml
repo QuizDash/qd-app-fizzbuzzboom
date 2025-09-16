@@ -1348,8 +1348,86 @@ Resources:
 
 
 Outputs:
-  FbtBoomApi:
+  FbtBoomApiId:
     Description: Id of FizzBuzzBoom api
     Value: !Ref FbtBoomApi
     Export:
-      Name: !Sub '${AWS::StackName}:FbtBoomApi'
+      Name: !Sub '${AWS::StackName}:FbtBoomApi:Id'
+
+  FbtWebSocketsApiId:
+    Description: Id of FbtWebSocketsApi api
+    Value: !Ref FbtWebSocketsApi
+    Export:
+      Name: !Sub '${AWS::StackName}:FbtWebSocketsApi:Id'
+
+  GameSessionTableName:
+    Description: Name of DDB table
+    Value: !Ref GameSessionTable
+    Export:
+      Name: !Sub '${AWS::StackName}:GameSessionTable:Name'
+
+  GameSessionParticipantTableName:
+    Description: Name of DDB table
+    Value: !Ref GameSessionParticipantTable
+    Export:
+      Name: !Sub '${AWS::StackName}:GameSessionParticipantTable:Name'
+
+  CreateSessionFunctionName:
+    Description: Lambda name
+    Value: !Ref CreateSessionFunction
+    Export:
+      Name: !Sub '${AWS::StackName}:CreateSessionFunction:Name'
+
+  GetSessionFunctionName:
+    Description: Lambda name
+    Value: !Ref GetSessionFunction
+    Export:
+      Name: !Sub '${AWS::StackName}:GetSessionFunction:Name'
+
+  GetSessionParticipantsFunctionName:
+    Description: Lambda name
+    Value: !Ref GetSessionParticipantsFunction
+    Export:
+      Name: !Sub '${AWS::StackName}:GetSessionParticipantsFunction:Name'
+
+  ReserveNicknameFunctionName:
+    Description: Lambda name
+    Value: !Ref ReserveNicknameFunction
+    Export:
+      Name: !Sub '${AWS::StackName}:ReserveNicknameFunction:Name'
+
+  PostQuestionFunctionName:
+    Description: Lambda name
+    Value: !Ref PostQuestionFunction
+    Export:
+      Name: !Sub '${AWS::StackName}:PostQuestionFunction:Name'
+
+  CheckAnswerFunctionName:
+    Description: Lambda name
+    Value: !Ref CheckAnswerFunction
+    Export:
+      Name: !Sub '${AWS::StackName}:CheckAnswerFunction:Name'
+
+  QuestionAnsweredFunctionName:
+    Description: Lambda name
+    Value: !Ref QuestionAnsweredFunction
+    Export:
+      Name: !Sub '${AWS::StackName}:QuestionAnsweredFunction:Name'
+
+  SocketConnectFunctionName:
+    Description: Lambda name
+    Value: !Ref SocketConnectFunction
+    Export:
+      Name: !Sub '${AWS::StackName}:SocketConnectFunction:Name'
+
+  SocketDisconnectFunctionName:
+    Description: Lambda name
+    Value: !Ref SocketDisconnectFunction
+    Export:
+      Name: !Sub '${AWS::StackName}:SocketDisconnectFunction:Name'
+
+  ParticipantConnectedFunctionName:
+    Description: Lambda name
+    Value: !Ref ParticipantConnectedFunction
+    Export:
+      Name: !Sub '${AWS::StackName}:ParticipantConnectedFunction:Name'
