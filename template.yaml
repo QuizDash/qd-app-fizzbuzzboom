@@ -47,6 +47,24 @@ Parameters:
       - ERROR
     Default: WARN
 
+  QuestionAnsweredAppLogLevel:
+    Type: String
+    AllowedValues:
+      - DEBUG
+      - INFO
+      - WARN
+      - ERROR
+    Default: INFO
+
+  ParticipantConnectedAppLogLevel:
+    Type: String
+    AllowedValues:
+      - DEBUG
+      - INFO
+      - WARN
+      - ERROR
+    Default: DEBUG
+
   GameMaxLambdaConcurrentExecutions:
     Type: String
     Default: 10
@@ -465,7 +483,7 @@ Resources:
       LoggingConfig:
         LogGroup: !Ref QuestionAnsweredFunctionLogs
         LogFormat: JSON
-        ApplicationLogLevel: !Ref ApplicationLogLevel
+        ApplicationLogLevel: !Ref QuestionAnsweredAppLogLevel
     Metadata: # Manage esbuild properties
       BuildMethod: esbuild
       BuildProperties:
@@ -479,7 +497,7 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/aws/lambda/${AWS::StackName}-QuestionAnsweredFunction"
-      RetentionInDays: 90
+      RetentionInDays: 30
 
   ApiGwExecutionLogs:
     Type: AWS::Logs::LogGroup
@@ -1108,7 +1126,7 @@ Resources:
       LoggingConfig:
         LogGroup: !Ref ParticipantConnectedFunctionLogs
         LogFormat: JSON
-        ApplicationLogLevel: !Ref ApplicationLogLevel
+        ApplicationLogLevel: !Ref ParticipantConnectedAppLogLevel
       Environment:
         Variables:
           IS_DEBUG_ENABLED: false

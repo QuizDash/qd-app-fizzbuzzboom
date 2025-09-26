@@ -10,10 +10,12 @@ export class GameSession {
   maxRandomValue = -1;
   timeLimitSeconds = 5;
 
+  readonly SESSIONID_LENGTH = 8;
+
   create(hostUserId: string, fizzMultiple: number, buzzMultiple: number,
          isRandomQuestion: boolean, maxRandomValue: number, timeLimitSeconds: number): GameSession {
     const currentTime = new Date();
-    this.sessionId = currentTime.getTime().toString(26).toUpperCase();
+    this.sessionId = GameSession.generateUniqueId(currentTime.getTime(), this.SESSIONID_LENGTH);
     this.hostUserId = hostUserId;
     this.createdOnUtc = currentTime.toISOString();
     this.createdOnEpoch = currentTime.getTime();
@@ -23,6 +25,17 @@ export class GameSession {
     this.maxRandomValue = maxRandomValue;
     this.timeLimitSeconds = timeLimitSeconds;
     return this;
+  }
+
+  private static generateUniqueId(time: number, strLen: number): string {
+    // Base36 gives [0-9a-z] encoding
+    const timePart = time.toString(36);
+    const randomPart = Math.random().toString(36).substring(2, 10);
+
+    // Combine and trim/pad to x chars
+    const uniqueString = (timePart + randomPart).substring(0, strLen);
+
+    return uniqueString.toUpperCase();
   }
 
 }

@@ -160,7 +160,7 @@ export class GameSessionService implements IGameSessionService {
     }
 
     const participants = await this.repo.querySessionParticipants(sessionId);
-    console.info('Participants:', JSON.stringify(participants));
+    console.info('Active participant count:', participants.length);
     const calls: any[] = [];
     for(let i = 0; i< participants.length; i++) {
       const participant = participants[i];
@@ -178,9 +178,25 @@ export class GameSessionService implements IGameSessionService {
       calls.push(this.wsClient.post(url, eventBody, headers));
     }
     try {
-      const result = await Promise.all(calls);
-      console.debug('Result', result);
-      console.debug('Completed');
+      const results = await Promise.all(calls);
+
+      const failedConns: any = []
+      for(let i = 0; i < results.length; i++) {
+        const res = results[i];
+        if(res.status != 200) {
+          const s = {status: res.status, statusText: res.statusText,
+            config: {url: res.config.url, data: res.config.data}};
+
+          failedConns.push(s);
+        }
+      }
+      console.debug('Failed client invocations:', failedConns);
+
+      const countsMap = new Map();
+      for (const res of results) {
+        countsMap.set(res.status, (countsMap.get(res.status) || 0) + 1);
+      }
+      console.info('Completed, client invocation status counts:', countsMap);
     }
     catch(e: any) {
       console.error(e.message);

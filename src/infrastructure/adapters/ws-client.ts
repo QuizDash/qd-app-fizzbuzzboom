@@ -33,7 +33,7 @@ export class WsClient implements IWsClient {
    * @return {any}
    */
   async post (endpointUrl: string, body: any, headers: any) {
-    console.info(`Calling: ${endpointUrl}`);
+    console.debug(`Calling: ${endpointUrl}`);
 
     const axiosRequestConfig = {
       timeout: Number(WS_REQUEST_TIMEOUT),
