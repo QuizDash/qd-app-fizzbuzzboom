@@ -37,7 +37,7 @@ exports.handler = async (event, context) => {
     Entries: [{
       Source: 'qd-app-fizzbuzzboom.WsDisconnectHandler',
       Detail: JSON.stringify(p),
-      DetailType: 'ParticipantConnected',
+      DetailType: 'ParticipantDisconnected',
       EventBusName: eventBusArn || '',
     }],
   };

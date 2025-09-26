@@ -1209,7 +1209,7 @@ Resources:
   FbbWebSocketsApiGwExecutionLogs:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Join [ "", [ "API-Gateway-Execution-Logs_", !Ref FbtWebSocketsApi, '/Prod' ] ]
+      LogGroupName: !Join [ "", [ "/aws/apigateway/", !Ref FbtWebSocketsApi, '/Prod' ] ]
       RetentionInDays: 90
 
 
